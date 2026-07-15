@@ -618,7 +618,10 @@ export default function Home() {
             <div
               className="rank-stack"
               key={group[0].rank}
-              style={{ "--stack-size": group.length } as CSSProperties}
+              style={{
+                "--stack-size": group.length,
+                "--stack-offset": `${Math.max(26, Math.min(38, Math.floor(182 / Math.max(1, group.length - 1))))}px`,
+              } as CSSProperties}
             >
               {group.map((card, stackIndex) => {
                 const index = handIndex.get(card.id) ?? 0;
