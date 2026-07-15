@@ -268,7 +268,7 @@ button:focus-visible { outline: 3px solid var(--gold-bright); outline-offset: 3p
   cursor:pointer; transform:translateY(0); transition:transform 130ms ease,box-shadow 130ms ease,border-color 130ms ease;
 }
 .playing-card:first-child { margin-left:0; }
-.playing-card:hover { transform:translateY(-8px); z-index:5; }
+.playing-card:hover { transform:translateY(-8px); }
 .playing-card.selected { transform:translateY(-20px); z-index:7; border-color:var(--gold); box-shadow:0 0 0 2px rgba(226,184,95,.35),0 0 20px rgba(226,184,95,.2),-5px 10px 17px rgba(0,0,0,.3); }
 .playing-card.red { color:var(--red); }
 .card-rank { display:block; font:750 clamp(19px,1.7vw,27px)/.95 Georgia,serif; }
