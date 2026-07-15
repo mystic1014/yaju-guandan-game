@@ -354,7 +354,7 @@ export default function Home() {
   return (
     <main className={`game-shell ${match.animationEnabled ? "motion-on" : "motion-off"}`}>
       <header className="topbar">
-        <div className="game-logo"><span>掼</span><strong>雅局掼蛋</strong></div>
+        <div className="game-logo"><span>掼</span><strong>掼蛋</strong></div>
         <div className="top-stat"><span>房间</span><b>6288</b></div>
         <div className="top-stat"><span>本局级牌</span><b>{match.currentLevel}</b></div>
         <div className="top-stat"><span>当前</span><b>第 {match.roundNumber} 局</b></div>
