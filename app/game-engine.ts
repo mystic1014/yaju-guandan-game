@@ -136,7 +136,9 @@ export interface SavedGame {
 }
 
 const PLAYER_NAMES = ["南风知意", "山高水长", "清风揽月", "墨染流年"];
-const SEATS: PlayerState["seat"][] = ["bottom", "left", "top", "right"];
+// Player ids advance 0 → 1 → 2 → 3. Map that sequence around the
+// visible table clockwise: bottom → right → top → left.
+const SEATS: PlayerState["seat"][] = ["bottom", "right", "top", "left"];
 const GROUP_LABELS: Record<PatternType, string> = {
   single: "单张",
   pair: "对子",
