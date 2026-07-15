@@ -99,6 +99,20 @@ test("rejects an invalid response and allows pass only after a lead", () => {
   assert.equal(passed.ok, true);
 });
 
+test("advances turns clockwise around the visible table", () => {
+  const match = createMatch(314);
+  assert.deepEqual(match.players.map((player) => player.seat), ["bottom", "right", "top", "left"]);
+
+  const lead = playCards(match, 0, [match.players[0].hand.at(-1).id]);
+  assert.equal(lead.ok, true);
+  assert.equal(lead.state.round.currentPlayer, 1);
+  assert.equal(lead.state.players[lead.state.round.currentPlayer].seat, "right");
+
+  const rightPass = passTurn(lead.state, 1);
+  assert.equal(rightPass.ok, true);
+  assert.equal(rightPass.state.players[rightPass.state.round.currentPlayer].seat, "top");
+});
+
 test("borrows the wind to the finished player's opposite-seat teammate", () => {
   const state = createMatch(41);
   state.players[0].finished = true;

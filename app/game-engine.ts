@@ -136,7 +136,9 @@ export interface SavedGame {
 }
 
 const PLAYER_NAMES = ["南风知意", "山高水长", "清风揽月", "墨染流年"];
-const SEATS: PlayerState["seat"][] = ["bottom", "left", "top", "right"];
+// Player ids advance 0 → 1 → 2 → 3. Map that sequence around the
+// visible table clockwise: bottom → right → top → left.
+const SEATS: PlayerState["seat"][] = ["bottom", "right", "top", "left"];
 const GROUP_LABELS: Record<PatternType, string> = {
   single: "单张",
   pair: "对子",
@@ -560,7 +562,8 @@ export function getLegalMoves(
   });
 }
 
-function dealPlayers(seed: number, level: StandardRank): PlayerState[] {
+function dealPlayers(seed: number, _level: StandardRank): PlayerState[] {
+  void _level;
   const shuffled = shuffleDeck(createDeck(), seed);
   return [0, 1, 2, 3].map((id) => ({
     id,
@@ -568,7 +571,9 @@ function dealPlayers(seed: number, level: StandardRank): PlayerState[] {
     team: (id % 2) as 0 | 1,
     seat: SEATS[id],
     isHuman: id === 0,
-    hand: sortHand(shuffled.slice(id * 27, id * 27 + 27), level),
+    // Keep the freshly dealt hand in its natural shuffled order. The human
+    // player can arrange it later with the explicit "智能理牌" action.
+    hand: shuffled.slice(id * 27, id * 27 + 27),
     finished: false,
     online: true,
     autoPlay: false,

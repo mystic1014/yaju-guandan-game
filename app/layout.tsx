@@ -17,7 +17,7 @@ export const metadata: Metadata = {
     locale: "zh_CN",
     images: [
       {
-        url: "/og-guandan.png",
+        url: "/og.png",
         width: 1792,
         height: 1024,
         alt: "雅局掼蛋——四人结对、双副牌 108 张、AI 对战",
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "雅局掼蛋",
     description: "四人结对 · 双副牌 108 张 · AI 对战",
-    images: ["/og-guandan.png"],
+    images: ["/og.png"],
   },
 };
 
