@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import {
   chooseAiMove,
   classifyHand,
@@ -17,6 +18,7 @@ import {
   type Card,
   type Difficulty,
   type MatchState,
+  type PlayedHand,
   type PlayerState,
 } from "./game-engine";
 
@@ -26,6 +28,9 @@ const DIFFICULTY_LABEL: Record<Difficulty, string> = {
   standard: "标准",
   expert: "高手",
 };
+
+type HandLayout = "row" | "stacked";
+type DragSelection = { active: boolean; anchor: number; mode: "select" | "deselect" };
 
 function playTone(enabled: boolean, frequency = 520) {
   if (!enabled || typeof window === "undefined") return;
@@ -52,20 +57,29 @@ function CardFace({
   card,
   selected,
   onClick,
+  onPointerDown,
+  onPointerEnter,
   compact = false,
+  dealing = false,
 }: {
   card: Card;
   selected?: boolean;
-  onClick?: () => void;
+  onClick?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onPointerDown?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onPointerEnter?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   compact?: boolean;
+  dealing?: boolean;
 }) {
   const red = card.suit === "♥" || card.suit === "♦" || card.rank === "BJ";
   const joker = card.rank === "SJ" || card.rank === "BJ";
   return (
     <button
       type="button"
-      className={`playing-card ${compact ? "compact" : ""} ${selected ? "selected" : ""} ${red ? "red" : ""}`}
+      className={`playing-card ${compact ? "compact" : ""} ${selected ? "selected" : ""} ${red ? "red" : ""} ${dealing ? "dealing-in" : ""}`}
       onClick={onClick}
+      onPointerDown={onPointerDown}
+      onPointerEnter={onPointerEnter}
+      onDragStart={(event) => event.preventDefault()}
       aria-pressed={selected}
       aria-label={joker ? (card.rank === "BJ" ? "大王" : "小王") : `${card.suit}${card.rank}`}
       tabIndex={onClick ? 0 : -1}
@@ -86,10 +100,12 @@ function PlayerPanel({
   player,
   active,
   seconds,
+  played,
 }: {
   player: PlayerState;
   active: boolean;
   seconds: number;
+  played?: PlayedHand;
 }) {
   const teamLabel = player.team === 0 ? "我方" : "对方";
   const initials = player.name.slice(0, 1);
@@ -120,6 +136,18 @@ function PlayerPanel({
       )}
       <div className={`countdown ${active ? "running" : ""}`}>
         <span>{active ? seconds : "—"}</span>
+      </div>
+      <div className={`seat-play seat-play-${player.seat}`} aria-live="polite">
+        {played ? (
+          <>
+            <div className="seat-play-cards">
+              {played.cards.map((card) => <CardFace key={card.id} card={card} compact />)}
+            </div>
+            <span>{played.pattern.label}</span>
+          </>
+        ) : (
+          <span className="seat-play-empty">等待出牌</span>
+        )}
       </div>
     </section>
   );
@@ -179,6 +207,12 @@ function StartScreen({
   );
 }
 
+function groupStackedHand(cards: Card[]): Card[][] {
+  const groups = new Map<Card["rank"], Card[]>();
+  cards.forEach((card) => groups.set(card.rank, [...(groups.get(card.rank) ?? []), card]));
+  return [...groups.values()];
+}
+
 export default function Home() {
   const [match, setMatch] = useState<MatchState | null>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>("standard");
@@ -188,8 +222,15 @@ export default function Home() {
   const [drawer, setDrawer] = useState<"history" | "score" | null>(null);
   const [hasSave, setHasSave] = useState(false);
   const [seconds, setSeconds] = useState(18);
+  const [handLayout, setHandLayout] = useState<HandLayout>("row");
+  const [isDealing, setIsDealing] = useState(false);
+  const [dealtCount, setDealtCount] = useState(27);
+  const [tablePlays, setTablePlays] = useState<Record<number, PlayedHand>>({});
+  const dragSelection = useRef<DragSelection>({ active: false, anchor: -1, mode: "select" });
+  const hintCursor = useRef({ signature: "", index: 0 });
   const currentPlayerId = match?.round.currentPlayer;
   const currentPhase = match?.round.phase;
+  const dealHandLength = match?.players[0].hand.length ?? 27;
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -205,6 +246,34 @@ export default function Home() {
   }, [match]);
 
   useEffect(() => {
+    if (!isDealing) return;
+    const timer = window.setInterval(() => {
+      setDealtCount((count) => {
+        if (count >= dealHandLength) {
+          window.clearInterval(timer);
+          setIsDealing(false);
+          setFeedback("发牌完成，点击“智能理牌”整理手牌");
+          return count;
+        }
+        return count + 1;
+      });
+    }, 42);
+    return () => window.clearInterval(timer);
+  }, [isDealing, dealHandLength, match?.roundNumber]);
+
+  useEffect(() => {
+    const stopDragging = () => {
+      dragSelection.current.active = false;
+    };
+    window.addEventListener("pointerup", stopDragging);
+    window.addEventListener("pointercancel", stopDragging);
+    return () => {
+      window.removeEventListener("pointerup", stopDragging);
+      window.removeEventListener("pointercancel", stopDragging);
+    };
+  }, []);
+
+  useEffect(() => {
     if (currentPhase !== "playing" || modal) return;
     const reset = window.setTimeout(() => setSeconds(18), 0);
     const timer = window.setInterval(() => {
@@ -217,57 +286,41 @@ export default function Home() {
   }, [currentPlayerId, currentPhase, modal]);
 
   const runAiTurn = useCallback(() => {
-    setMatch((current) => {
-      if (!current || current.round.phase !== "playing") return current;
-      const player = current.players[current.round.currentPlayer];
-      if (player.isHuman && !player.autoPlay) return current;
-      const observation = observeForAi(current, player.id);
-      const move = chooseAiMove(observation);
-      const result = move
-        ? playCards(current, player.id, move.map((card) => card.id))
-        : passTurn(current, player.id);
-      if (result.ok) playTone(current.soundEnabled, move ? 440 : 260);
-      return result.state;
-    });
-  }, []);
+    if (!match || match.round.phase !== "playing") return;
+    const player = match.players[match.round.currentPlayer];
+    if (player.isHuman && !player.autoPlay) return;
+    const observation = observeForAi(match, player.id);
+    const move = chooseAiMove(observation);
+    const result = move
+      ? playCards(match, player.id, move.map((card) => card.id))
+      : passTurn(match, player.id);
+    if (!result.ok) return;
+    playTone(match.soundEnabled, move ? 440 : 260);
+    if (move) {
+      const played = result.state.round.history.at(-1);
+      if (played) setTablePlays((current) => ({ ...current, [player.id]: played }));
+    }
+    setMatch(result.state);
+  }, [match]);
 
   useEffect(() => {
-    if (!match || modal || match.round.phase !== "playing") return;
+    if (!match || modal || isDealing || match.round.phase !== "playing") return;
     const player = match.players[match.round.currentPlayer];
     if (player.isHuman && !player.autoPlay) return;
     const timeout = window.setTimeout(runAiTurn, match.animationEnabled ? 650 : 120);
     return () => window.clearTimeout(timeout);
-  }, [match, modal, runAiTurn]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!match || modal) return;
-      if (event.key === "Escape") setSelected([]);
-      if (event.key.toLowerCase() === "h") {
-        event.preventDefault();
-        const human = match.players[0];
-        const move = getLegalMoves(human.hand, match.round.lastPlay?.pattern ?? null, match.currentLevel)[0];
-        if (move) setSelected(move.map((card) => card.id));
-      }
-      if (event.key === "Enter" && selected.length) {
-        event.preventDefault();
-        const result = playCards(match, 0, selected);
-        if (result.ok) {
-          setMatch(result.state);
-          setSelected([]);
-          setFeedback("");
-        } else setFeedback(result.error ?? "无法出牌");
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [match, modal, selected]);
+  }, [match, modal, isDealing, runAiTurn]);
 
   const startNew = () => {
-    setMatch(createMatch(Date.now(), difficulty));
+    const next = createMatch(Date.now(), difficulty);
+    setMatch(next);
     setHasSave(true);
     setSelected([]);
-    setFeedback("");
+    setTablePlays({});
+    setDealtCount(0);
+    setIsDealing(true);
+    setFeedback("正在发牌…");
+    hintCursor.current = { signature: "", index: 0 };
   };
 
   const continueSaved = () => {
@@ -276,50 +329,142 @@ export default function Home() {
     if (restored) {
       setMatch(restored);
       setDifficulty(restored.difficulty);
+      setDealtCount(restored.players[0].hand.length);
+      setIsDealing(false);
+      setTablePlays({});
       setFeedback("牌局已恢复");
     }
   };
 
   const toggleCard = (id: string) => {
-    if (!match || match.round.currentPlayer !== 0 || match.round.phase !== "playing") return;
+    if (!match || isDealing || match.round.currentPlayer !== 0 || match.round.phase !== "playing") return;
     setSelected((current) => current.includes(id) ? current.filter((cardId) => cardId !== id) : [...current, id]);
     setFeedback("");
   };
 
-  const submitPlay = () => {
+  const applyDragRange = (toIndex: number) => {
     if (!match) return;
+    const hand = match.players[0].hand;
+    const from = Math.min(dragSelection.current.anchor, toIndex);
+    const to = Math.max(dragSelection.current.anchor, toIndex);
+    const ids = new Set(hand.slice(from, to + 1).map((card) => card.id));
+    setSelected((current) => {
+      const next = new Set(current);
+      ids.forEach((id) => dragSelection.current.mode === "select" ? next.add(id) : next.delete(id));
+      return [...next];
+    });
+    setFeedback("");
+  };
+
+  const beginDragSelection = (index: number, event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!isHumanTurn || isDealing || event.button !== 0) return;
+    event.preventDefault();
+    const id = match.players[0].hand[index].id;
+    dragSelection.current = {
+      active: true,
+      anchor: index,
+      mode: selected.includes(id) ? "deselect" : "select",
+    };
+    applyDragRange(index);
+  };
+
+  const continueDragSelection = (index: number, event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!dragSelection.current.active || event.buttons !== 1) return;
+    applyDragRange(index);
+  };
+
+  const submitPlay = useCallback(() => {
+    if (!match || isDealing) return;
     const result = playCards(match, 0, selected);
     if (!result.ok) {
       setFeedback(result.error ?? "无法出牌");
       return;
     }
     playTone(match.soundEnabled, 620);
+    const played = result.state.round.history.at(-1);
+    setTablePlays(played ? { 0: played } : {});
     setMatch(result.state);
     setSelected([]);
     setFeedback("");
-  };
+  }, [match, isDealing, selected]);
 
   const submitPass = () => {
-    if (!match) return;
+    if (!match || isDealing) return;
     const result = passTurn(match, 0);
     if (!result.ok) {
       setFeedback(result.error ?? "现在不能不要");
       return;
     }
     playTone(match.soundEnabled, 260);
+    setTablePlays({});
     setMatch(result.state);
     setSelected([]);
     setFeedback("");
   };
 
-  const hint = () => {
-    if (!match) return;
-    const move = getLegalMoves(match.players[0].hand, match.round.lastPlay?.pattern ?? null, match.currentLevel)[0];
-    if (move) {
-      setSelected(move.map((card) => card.id));
-      setFeedback(`提示：${classifyHand(move, match.currentLevel)?.label ?? "可出牌"}`);
-    } else setFeedback("当前没有能压过上一手的牌，可以选择不要");
+  const hint = useCallback(() => {
+    if (!match || isDealing || match.round.currentPlayer !== 0 || match.round.phase !== "playing") return;
+    const moves = getLegalMoves(match.players[0].hand, match.round.lastPlay?.pattern ?? null, match.currentLevel);
+    if (!moves.length) {
+      setSelected([]);
+      setFeedback("当前没有能压过上一手的牌，可以选择不要");
+      return;
+    }
+    const signature = [
+      match.round.lastPlay?.turn ?? "lead",
+      match.round.lastPlay?.pattern.type ?? "none",
+      match.players[0].hand.map((card) => card.id).join("|"),
+    ].join("::");
+    const cursor = hintCursor.current.signature === signature ? hintCursor.current.index : 0;
+    const index = cursor % moves.length;
+    const move = moves[index];
+    hintCursor.current = { signature, index: index + 1 };
+    setSelected(move.map((card) => card.id));
+    setFeedback(`提示 ${index + 1}/${moves.length}：${classifyHand(move, match.currentLevel)?.label ?? "可出牌"}（再次点击切换）`);
+  }, [match, isDealing]);
+
+  const smartArrange = () => {
+    if (!match || isDealing) return;
+    setMatch({
+      ...match,
+      players: match.players.map((player) => player.id === 0
+        ? { ...player, hand: sortHand(player.hand, match.currentLevel) }
+        : player),
+    });
+    setSelected([]);
+    setFeedback("已按点数、级牌和花色智能整理");
+    hintCursor.current = { signature: "", index: 0 };
   };
+
+  const dealNextRound = () => {
+    if (!match) return;
+    const result = startNextRound(match);
+    if (!result.ok) return;
+    setMatch(result.state);
+    setSelected([]);
+    setTablePlays({});
+    setDealtCount(0);
+    setIsDealing(true);
+    setFeedback("正在发牌…");
+    hintCursor.current = { signature: "", index: 0 };
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!match || modal || isDealing) return;
+      if (event.key === "Escape") setSelected([]);
+      if (event.key.toLowerCase() === "h") {
+        event.preventDefault();
+        hint();
+      }
+      if (event.key === "Enter" && selected.length) {
+        event.preventDefault();
+        submitPlay();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [match, modal, isDealing, selected, hint, submitPlay]);
 
   const selectedPattern = useMemo(() => {
     if (!match || !selected.length) return null;
@@ -348,8 +493,10 @@ export default function Home() {
   const teamCounts = [0, 1].map((team) =>
     match.players.filter((player) => player.team === team).reduce((total, player) => total + player.hand.length, 0),
   );
-  const lastCards = match.round.lastPlay?.cards ?? [];
   const finishNames = match.round.finishOrder.map((id) => match.players[id].name);
+  const visibleHand = human.hand.slice(0, isDealing ? dealtCount : human.hand.length);
+  const handIndex = new Map(human.hand.map((card, index) => [card.id, index]));
+  const stackedGroups = handLayout === "stacked" ? groupStackedHand(visibleHand) : [];
 
   return (
     <main className={`game-shell ${match.animationEnabled ? "motion-on" : "motion-off"}`}>
@@ -411,15 +558,19 @@ export default function Home() {
         <div className="wood-rim">
           <div className="felt-table">
             {match.players.map((player) => (
-              <PlayerPanel key={player.id} player={player} active={match.round.currentPlayer === player.id && match.round.phase === "playing"} seconds={seconds} />
+              <PlayerPanel
+                key={player.id}
+                player={player}
+                active={!isDealing && match.round.currentPlayer === player.id && match.round.phase === "playing"}
+                seconds={seconds}
+                played={tablePlays[player.id]}
+              />
             ))}
 
             <section className="center-play" aria-live="polite">
-              <span className="round-kicker">本轮出牌 · 第 {Math.max(1, match.round.turn)} 手</span>
-              <h2>{match.round.statusMessage}</h2>
-              <div className="last-play-cards">
-                {lastCards.length ? lastCards.map((card) => <CardFace key={card.id} card={card} compact />) : <div className="lead-placeholder">等待领出</div>}
-              </div>
+              <span className="round-kicker">第 {match.roundNumber} 局 · 第 {Math.max(1, match.round.turn)} 手</span>
+              <div className="level-medallion"><span>级牌</span><b>{match.currentLevel}</b></div>
+              <h2>{isDealing ? "正在发牌" : match.round.statusMessage}</h2>
               {match.round.lastPlay && (
                 <p className="last-play-label">
                   {match.players[match.round.lastPlay.playerId].name} · {match.round.lastPlay.pattern.label}
@@ -427,30 +578,82 @@ export default function Home() {
               )}
               <div className="remaining-score"><span>我方 <b>{teamCounts[0]}</b></span><i /><span>对方 <b>{teamCounts[1]}</b></span></div>
             </section>
+
+            {isDealing && (
+              <div className="deal-overlay" aria-label={`正在发牌，已发 ${dealtCount} 张`}>
+                <div className="deck-stack"><span /><span /><span /></div>
+                {[0, 1, 2, 3].map((seat) => <i key={seat} className={`flying-card fly-${seat}`} />)}
+                <b>{dealtCount}<small>/27</small></b>
+              </div>
+            )}
           </div>
         </div>
       </section>
 
-      <section className="hand-area" aria-label="我的手牌">
+      <section className={`hand-area layout-${handLayout}`} aria-label="我的手牌">
         <div className="hand-summary">
           <span>我的手牌</span><b>{human.hand.length} 张</b>
           {selectedPattern && <em>{selectedPattern.label}</em>}
         </div>
-        <div className="hand-cards">
-          {human.hand.map((card) => (
-            <CardFace key={card.id} card={card} selected={selected.includes(card.id)} onClick={() => toggleCard(card.id)} />
+        <div className="hand-layout-switch" role="group" aria-label="手牌摆放方式">
+          <button type="button" className={handLayout === "row" ? "active" : ""} onClick={() => setHandLayout("row")}>横向一排</button>
+          <button type="button" className={handLayout === "stacked" ? "active" : ""} onClick={() => setHandLayout("stacked")}>同点叠放</button>
+        </div>
+        <div className="drag-tip">按住一张牌左右拖动，可连续选择</div>
+        <div className="hand-cards" data-layout={handLayout}>
+          {handLayout === "row" ? visibleHand.map((card) => {
+            const index = handIndex.get(card.id) ?? 0;
+            return (
+              <CardFace
+                key={card.id}
+                card={card}
+                dealing={isDealing}
+                selected={selected.includes(card.id)}
+                onClick={(event) => { if (event.detail === 0) toggleCard(card.id); }}
+                onPointerDown={(event) => beginDragSelection(index, event)}
+                onPointerEnter={(event) => continueDragSelection(index, event)}
+              />
+            );
+          }) : stackedGroups.map((group) => (
+            <div
+              className="rank-stack"
+              key={group[0].rank}
+              style={{ "--stack-size": group.length } as CSSProperties}
+            >
+              {group.map((card, stackIndex) => {
+                const index = handIndex.get(card.id) ?? 0;
+                return (
+                  <div className="stack-card" key={card.id} style={{ "--stack-index": stackIndex } as CSSProperties}>
+                    <CardFace
+                      card={card}
+                      dealing={isDealing}
+                      selected={selected.includes(card.id)}
+                      onClick={(event) => { if (event.detail === 0) toggleCard(card.id); }}
+                      onPointerDown={(event) => beginDragSelection(index, event)}
+                      onPointerEnter={(event) => continueDragSelection(index, event)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           ))}
         </div>
       </section>
 
       <footer className="action-bar">
-        <button className="play-button" type="button" onClick={submitPlay} disabled={!isHumanTurn || selected.length === 0}>出牌</button>
-        <button type="button" onClick={submitPass} disabled={!isHumanTurn || !match.round.lastPlay}>不要</button>
-        <button type="button" onClick={hint} disabled={!isHumanTurn}>提示</button>
-        <button type="button" onClick={() => setMatch({ ...match, players: match.players.map((player) => player.id === 0 ? { ...player, hand: sortHand(player.hand, match.currentLevel) } : player) })}>排序</button>
-        <button type="button" onClick={() => setSelected([])} disabled={!selected.length}>撤销选择</button>
-        <button type="button" onClick={() => setMatch({ ...match, players: match.players.map((player) => player.id === 0 ? { ...player, autoPlay: !player.autoPlay } : player) })}>{human.autoPlay ? "取消托管" : "自动托管"}</button>
-        <button type="button" onClick={() => setModal("settings")}>设置</button>
+        <div className="action-cluster arrange-actions">
+          <button className="arrange-button" type="button" onClick={smartArrange} disabled={isDealing}><span>✦</span>智能理牌</button>
+          <button type="button" onClick={() => setSelected([])} disabled={!selected.length}>撤销选择</button>
+        </div>
+        <div className="action-cluster play-actions">
+          <button type="button" onClick={submitPass} disabled={!isHumanTurn || isDealing || !match.round.lastPlay}>不要</button>
+          <button type="button" onClick={hint} disabled={!isHumanTurn || isDealing}>提示</button>
+          <button className="play-button" type="button" onClick={submitPlay} disabled={!isHumanTurn || isDealing || selected.length === 0}>出牌</button>
+        </div>
+        <div className="action-cluster utility-actions">
+          <button type="button" onClick={() => setMatch({ ...match, players: match.players.map((player) => player.id === 0 ? { ...player, autoPlay: !player.autoPlay } : player) })}>{human.autoPlay ? "取消托管" : "自动托管"}</button>
+          <button type="button" onClick={() => setModal("settings")}>设置</button>
+        </div>
         <div className={`feedback ${feedback ? "show" : ""}`} role="status">{feedback || "快捷键：H 提示 · Enter 出牌 · Esc 撤销"}</div>
       </footer>
 
@@ -475,7 +678,7 @@ export default function Home() {
             <ol>{finishNames.map((name, index) => <li key={name}><span>第 {index + 1} 名</span><b>{name}</b></li>)}</ol>
             <div className="result-levels"><span>我方级牌 <b>{match.teamLevels[0]}</b></span><span>对方级牌 <b>{match.teamLevels[1]}</b></span></div>
             {match.round.phase === "roundEnd" ? (
-              <button className="primary-action" type="button" onClick={() => setMatch(startNextRound(match).state)}>进入下一局</button>
+              <button className="primary-action" type="button" onClick={dealNextRound}>进入下一局</button>
             ) : (
               <button className="primary-action" type="button" onClick={startNew}>再来一场</button>
             )}
