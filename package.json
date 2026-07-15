@@ -9,9 +9,11 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
+    "dev:pages": "vite --config vite.static.config.ts",
+    "build:pages": "vite build --config vite.static.config.ts",
     "test:engine": "node --test tests/game-engine.test.mjs",
-    "test": "npm run test:engine && npm run build && node --test tests/rendered-html.test.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "test": "npm run test:engine && npm run build && node --test tests/rendered-html.test.mjs && npm run build:pages && node --test tests/static-pages.test.mjs",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern docs",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

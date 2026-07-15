@@ -2,6 +2,10 @@
 
 一款可离线续玩的单人网页掼蛋游戏：玩家与三名 AI 使用两副牌（108 张）对局，每人 27 张，队友固定坐在正对面。
 
+## 在线试玩
+
+GitHub Pages：<https://mystic1014.github.io/yaju-guandan-game/>
+
 ## 规则基准
 
 规则引擎以 2022 年《竞技掼蛋竞赛规则（试行）》为基准，覆盖：
@@ -22,7 +26,12 @@ npm install
 npm run dev
 ```
 
-访问 `http://localhost:3000`。
+用于 GitHub Pages 的静态版本：
+
+```bash
+npm run dev:pages
+npm run build:pages
+```
 
 ## 测试
 
@@ -32,7 +41,7 @@ npm run lint
 npx tsc --noEmit
 ```
 
-`npm test` 会依次运行规则引擎测试、生产构建和服务端渲染验收。浏览器实机验收覆盖 1920×1080、1366×768 与 1024×768 横屏尺寸。
+`npm test` 会依次运行规则引擎测试、生产构建、服务端渲染验收和 GitHub Pages 静态构建验收。浏览器实机验收覆盖 1920×1080、1366×768 与 1024×768 横屏尺寸。
 
 ## 存档与隐私
 
