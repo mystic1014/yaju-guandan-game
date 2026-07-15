@@ -373,6 +373,15 @@ export default function Home() {
     applyDragRange(index);
   };
 
+  const clearSelectionFromBlank = (event: ReactMouseEvent<HTMLElement>) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.closest("button, a, input, select, textarea, [role='button'], [role='dialog']")) return;
+    dragSelection.current.active = false;
+    setSelected([]);
+    setFeedback("");
+  };
+
   const submitPlay = useCallback(() => {
     if (!match || isDealing) return;
     const result = playCards(match, 0, selected);
@@ -499,7 +508,10 @@ export default function Home() {
   const stackedGroups = handLayout === "stacked" ? groupStackedHand(visibleHand) : [];
 
   return (
-    <main className={`game-shell ${match.animationEnabled ? "motion-on" : "motion-off"}`}>
+    <main
+      className={`game-shell ${match.animationEnabled ? "motion-on" : "motion-off"}`}
+      onDoubleClick={clearSelectionFromBlank}
+    >
       <header className="topbar">
         <div className="game-logo"><span>掼</span><strong>掼蛋</strong></div>
         <div className="top-stat"><span>房间</span><b>6288</b></div>
